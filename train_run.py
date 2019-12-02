@@ -85,7 +85,7 @@ def BCERankingLoss(d0s, d1s, judges, chn_mid=32, eps=0.1):
 
 # Construct the graph.
 
-with tf.device('/gpu:0'):
+with tf.device('/cpu:0'):
 	model = elpips.Metric(model_config, back_prop=True, trainable='lpips', use_lpips_dropout=opt.use_dropout)
 
 	tf_X_image = tf.placeholder(tf.float32, [opt.batch_size, 64, 64, 3])
