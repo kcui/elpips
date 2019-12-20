@@ -30,6 +30,14 @@ class Config:
 		self.enable_scale = True
 		self.set_scale_levels(8)
 		
+		# Enables additional random transformation from Eilertsen.
+		self.enable_perturbations = True
+
+		self.set_translation_levels(2, 2)  # +-2 pixels in each axis direction
+		self.set_rotation_levels(1)  # +- 1 degrees in each axis direction
+		self.set_zoom_levels(0.03)  # 1 +- 0.03 zoom
+		self.set_shear_levels(1, 1)
+
 		# Enables cropping instead of padding. Faster but may randomly skip edges of the input.
 		self.fast_and_approximate = False
 		
@@ -47,7 +55,21 @@ class Config:
 		'''Sets the number of scale levels based on the image size.'''
 		image_size = min(image_h, image_w)
 		self.set_scale_levels(max(1, image_size // 64))
-		
+	
+	def set_translation_levels(self, translation_x, translation_y):
+		self.translation_level_x = translation_x
+		self.translation_level_y = translation_y
+	
+	def set_rotation_levels(self, rotation):
+		self.rotation_level = rotation
+
+	def set_zoom_levels(self, zoom):
+		self.zoom_level = zoom
+
+	def set_shear_levels(self, shear_x, shear_y):
+		self.shear_level_x = shear_x
+		self.shear_level_y = shear_y
+
 	def validate(self):
 		assert self.metric in ('vgg_ensemble', 'vgg', 'squeeze', 'squeeze_ensemble_maxpool')
 		assert self.color_multiplication_mode in ('color', 'brightness')
@@ -167,6 +189,27 @@ def apply_ensemble(config, sampled_ensemble_params, X):
 		
 		X = tf.cond(tf.equal(scale_level, 1), downscale_1x, downscale_nx)
 	
+	if config.enable_perturbations:
+		tx = tf.random_uniform(shape=[config.batch_size,1], minval=-config.translation_level_x, maxval=config.translation_level_x, dtype=tf.float32)
+		ty = tf.random_uniform(shape=[config.batch_size,1], minval=-config.translation_level_y, maxval=config.translation_level_y, dtype=tf.float32)
+		r  = tf.random_uniform(shape=[config.batch_size,1], minval=np.deg2rad(-config.rotation_level), maxval=np.deg2rad(config.rotation_level), dtype=tf.float32)
+		z  = tf.random_uniform(shape=[config.batch_size,1], minval=1.0-config.zoom_level, maxval=1.0+config.zoom_level, dtype=tf.float32)
+		hx = tf.random_uniform(shape=[config.batch_size,1], minval=np.deg2rad(-config.shear_level_x), maxval=np.deg2rad(config.shear_level_x), dtype=tf.float32)
+		hy = tf.random_uniform(shape=[config.batch_size,1], minval=np.deg2rad(-config.shear_level_y), maxval=np.deg2rad(config.shear_level_y), dtype=tf.float32)
+		a = hx - r
+		b = tf.cos(hx)
+		c = hy + r
+		d = tf.cos(hy)
+		m1 = tf.divide(z*tf.cos(a), b)
+		m2 = tf.divide(z*tf.sin(a), b)
+		m3 = tf.divide(W*b-W*z*tf.cos(a)+2*tx*z*tf.cos(a)-H*z*tf.sin(a)+2*ty*z*tf.sin(a), 2*b)
+		m4 = tf.divide(z*tf.sin(c), d)
+		m5 = tf.divide(z*tf.cos(c), d)
+		m6 = tf.divide(H*d-H*z*tf.cos(c)+2*ty*z*tf.cos(c)-W*z*tf.sin(c)+2*tx*z*tf.sin(c), 2*d)
+		m7 = tf.zeros([config.batch_size,2], 'float32')
+		transf = tf.concat([m1, m2, m3, m4, m5, m6, m7], 1)
+		y_aug = tf.contrib.image.transform(y_aug, transf, interpolation='BILINEAR')
+
 	# Pad image.
 	if config.enable_offset:
 		L = []
